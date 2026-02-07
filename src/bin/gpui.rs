@@ -1,11 +1,17 @@
+use arena::Engine;
 use gpui::{
-    App, Application, Bounds, Context, Focusable, KeyBinding, Rgba, Window, WindowBounds,
-    WindowOptions, actions, div, img, prelude::*, px, rgb, size,
+    App, Application, Bounds, Context, Focusable, Rgba, Window, WindowBounds, WindowOptions, div,
+    img, prelude::*, px, rgb, size,
 };
 use queenfish::board::Board as QueenFishBoard;
 use queenfish::board::bishop_magic::init_bishop_magics;
 use queenfish::board::rook_magic::init_rook_magics;
-use std::{collections::HashSet, path::Path};
+use std::thread;
+use std::{
+    collections::HashSet,
+    path::Path,
+    sync::mpsc::{self, Receiver, Sender},
+};
 
 const WHITE_PAWN: &str = "C:\\Learn\\LearnRust\\Chess Arena\\arena\\pieces\\wP.svg";
 const WHITE_KNIGHT: &str = "C:\\Learn\\LearnRust\\Chess Arena\\arena\\pieces\\wN.svg";
@@ -28,12 +34,13 @@ fn dark_board_color() -> Rgba {
     rgb(0xb58863)
 }
 
-actions!(play, [Play]);
-
 struct Board {
     board: QueenFishBoard,
     focus_handle: gpui::FocusHandle,
     available_moves: Vec<(u8, u8)>,
+    analysis: Vec<String>,
+    analysis_rx: Option<Receiver<String>>,
+    engine_tx: Option<Sender<String>>,
 }
 
 impl Focusable for Board {
@@ -43,13 +50,6 @@ impl Focusable for Board {
 }
 
 impl Board {
-    pub fn play(&mut self, _: &Play, _: &mut Window, cx: &mut Context<Self>) {
-        let board = &mut self.board;
-        let moves = board.generate_moves();
-        board.make_move(moves[0]);
-        cx.notify();
-    }
-
     pub fn select_square(&mut self, square: u8) {
         let moves = self.board.generate_moves();
         let available_squares = self
@@ -81,19 +81,74 @@ impl Board {
             dbg!(&avail_squares);
             self.available_moves = avail_squares;
         }
-    }
+    } //
+
+    pub fn analyze(&mut self, cx: &mut Context<Self>) {
+        let Some(tx) = self.engine_tx.as_mut() else {
+            eprintln!("engine_tx missing");
+            return;
+        };
+
+        self.analysis.clear();
+
+        tx.send("stop\n".to_string()).ok();
+        tx.send(format!("position fen {} 0 1\ngo\n", self.board.to_fen()))
+            .ok();
+
+        cx.notify();
+    } //
 
     pub fn new(focus_handle: gpui::FocusHandle) -> Self {
+        let mut board = QueenFishBoard::new();
+        board.load_from_fen("r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1");
+
+        let (cmd_tx, cmd_rx): (Sender<String>, Receiver<String>) = mpsc::channel();
+        let (evt_tx, evt_rx): (Sender<String>, Receiver<String>) = mpsc::channel();
+
+        thread::spawn(move || {
+            println!("Starting the engine");
+            let engine = Engine::new(
+                "C:\\Learn\\LearnRust\\chess\\target\\release\\uci.exe",
+                "Queenfish 2",
+            );
+            let mut engine = engine.spawn_process();
+
+            loop {
+                // commands from UI
+                if let Ok(cmd) = cmd_rx.try_recv() {
+                    println!("cmd: {}", cmd);
+                    engine.send_command(&cmd);
+                }
+
+                // engine output
+                match engine.read_line() {
+                    Some(line) => {
+                        evt_tx.send(line).ok();
+                    }
+                    None => break, // engine exited
+                }
+            }
+        });
+
         Board {
-            board: QueenFishBoard::new(),
+            board,
             focus_handle,
             available_moves: Vec::new(),
+            analysis: Vec::new(),
+            analysis_rx: Some(evt_rx),
+            engine_tx: Some(cmd_tx),
         }
     }
 }
 
 impl Render for Board {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(rx) = self.analysis_rx.as_mut() {
+            while let Ok(line) = rx.try_recv() {
+                self.analysis.push(line[..(line.len() - 2)].to_string());
+            }
+        }
+
         let squares = (0..64)
             .map(|i| {
                 let file = i % 8;
@@ -130,6 +185,8 @@ impl Render for Board {
                     .flex()
                     .items_center()
                     .justify_center()
+                    .w(px(40.)) // Adjust size as needed
+                    .h(px(40.))
                     .child(img(Path::new(piece_image)).size_full());
 
                 if self
@@ -168,8 +225,8 @@ impl Render for Board {
                                     div()
                                         .bg(rgb(0xaeb187))
                                         .rounded_full()
-                                        .w(px(20.0)) // Adjust size as needed
-                                        .h(px(20.0)),
+                                        .w_1_3() // Adjust size as needed
+                                        .h_1_3(),
                                 ),
                         );
                     }
@@ -188,14 +245,55 @@ impl Render for Board {
             .collect::<Vec<_>>();
 
         div()
-            .key_context("board")
-            .track_focus(&self.focus_handle(cx))
+            .bg(rgb(0x161512))
             .size_full()
-            .grid()
-            .grid_cols(8)
-            .grid_rows(8)
-            .children(squares)
-            .on_action(cx.listener(Self::play))
+            .flex()
+            .flex_grow()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .w(px(8. * 40.))
+                    .h(px(8. * 40.))
+                    .grid()
+                    .grid_cols(8)
+                    .grid_rows(8)
+                    .children(squares),
+            )
+            .child(
+                div()
+                    .h(px(10.))
+                    .w_full()
+                    .rounded_md()
+                    .bg(rgb(0x262421))
+                    .flex()
+                    .flex_row()
+                    .gap_2()
+                    .items_center()
+                    .justify_between()
+                    .p_1()
+                    .child(format!("Analyze board"))
+                    .text_color(gpui::white())
+                    .on_any_mouse_down(cx.listener(move |board, _event, _window, cx| {
+                        board.analyze(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .h_1_3()
+                    .bg(rgb(0x262421))
+                    .rounded_md()
+                    .p_1()
+                    .gap_neg_112()
+                    .child(format!("analysis"))
+                    .text_color(gpui::white())
+                    .children(
+                        self.analysis
+                            .iter()
+                            .map(|x| div().child(x.clone()).text_color(gpui::white()).text_sm()),
+                    ),
+            )
     }
 }
 
@@ -205,10 +303,6 @@ fn main() {
 
     Application::new().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(500.), px(500.0)), cx);
-        cx.bind_keys([
-            KeyBinding::new("space", Play, Some("board")),
-            KeyBinding::new("enter", Play, Some("board")),
-        ]);
 
         cx.open_window(
             WindowOptions {
