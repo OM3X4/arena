@@ -1,32 +1,31 @@
+use arena::gui::constants::{
+    BLACK_BISHOP, BLACK_KING, BLACK_KNIGHT, BLACK_PAWN, BLACK_QUEEN, BLACK_ROOK, WHITE_BISHOP,
+    WHITE_KING, WHITE_KNIGHT, WHITE_PAWN, WHITE_QUEEN, WHITE_ROOK,
+};
 use arena::gui::input::{
     Backspace, Copy, Cut, Delete, End, Home, InputController, InputField, Left, Paste, Right,
     SelectAll, SelectLeft, SelectRight, ShowCharacterPalette,
 };
 use arena::{Engine, EngineHandle, gui};
 use gpui::{
-    App, Application, Bounds, Context, Entity, Focusable, Global, KeyBinding, SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions,
-    div, img, prelude::*, px, rgb, size
+    App, Application, Bounds, Context, Entity, Focusable, FontWeight, Global, KeyBinding,
+    SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, div, img, prelude::*, px,
+    rgb, size,
 };
 use queenfish::board::Board as QueenFishBoard;
 use queenfish::board::bishop_magic::init_bishop_magics;
 use queenfish::board::rook_magic::init_rook_magics;
 use std::{collections::HashSet, path::Path};
-use arena::gui::constants::{BLACK_BISHOP, BLACK_KING, BLACK_KNIGHT, BLACK_PAWN,
-    BLACK_QUEEN, BLACK_ROOK, WHITE_BISHOP, WHITE_KING, WHITE_KNIGHT, WHITE_PAWN,
-    WHITE_QUEEN, WHITE_ROOK};
 // use arena::gui::constants::{BLACK_BISHOP, BLACK_KING, BLACK_KNIGHT};
 
 pub struct SharedState {
-    fen_string: Option<SharedString>
+    fen_string: Option<SharedString>,
 }
 impl Global for SharedState {}
 
-
-
-
 struct FenWindow {
     input_controller: Entity<InputController>,
-    focus_handle: gpui::FocusHandle
+    focus_handle: gpui::FocusHandle,
 }
 impl Focusable for FenWindow {
     fn focus_handle(&self, _cx: &App) -> gpui::FocusHandle {
@@ -36,11 +35,9 @@ impl Focusable for FenWindow {
 
 impl Render for FenWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-
         let input_controller = self.input_controller.clone().read(cx);
         let input_field = input_controller.text_input.clone().read(cx);
         let content = input_field.content.as_str().to_string();
-
 
         div()
             .bg(rgb(gui::colors::BACKGROUND))
@@ -55,7 +52,8 @@ impl Render for FenWindow {
             .child(self.input_controller.clone())
             .child(button("Load", move |_, cx| {
                 println!("Dispatching");
-                cx.global_mut::<SharedState>().fen_string = Some(SharedString::from(content.clone()));
+                cx.global_mut::<SharedState>().fen_string =
+                    Some(SharedString::from(content.clone()));
             }))
     }
 }
@@ -67,7 +65,6 @@ struct Board {
     analysis: Vec<String>,
     engine_handle: Option<EngineHandle>,
     is_analyzing: bool,
-    is_load_fen_window_opened: bool,
 }
 
 impl Focusable for Board {
@@ -125,9 +122,6 @@ impl Board {
         } else {
             handle.send_command("stop\n");
             self.analysis.clear();
-            handle.send_command(dbg!(
-                format!("position fen {} 0 1\ngo\n", self.board.to_fen()).as_str()
-            ));
             self.is_analyzing = true;
         }
 
@@ -151,7 +145,6 @@ impl Board {
             analysis: Vec::new(),
             engine_handle: Some(engine_handle),
             is_analyzing: false,
-            is_load_fen_window_opened: false,
         };
 
         return element;
@@ -166,7 +159,7 @@ impl Board {
         }
     } //
 
-    pub fn reset_board(&mut self, cx: &mut Context<Self>) {
+    pub fn reset_board(&mut self) {
         self.board = QueenFishBoard::new();
         self.available_moves = Vec::new();
         if let Some(handle) = self.engine_handle.as_mut() {
@@ -174,7 +167,6 @@ impl Board {
         }
         self.analysis.clear();
         self.is_analyzing = false;
-        cx.notify();
     } //
 
     pub fn load_from_fen(&mut self, fen: String) {
@@ -295,144 +287,116 @@ impl Render for Board {
         div()
             .bg(rgb(gui::colors::BACKGROUND))
             .size_full()
-            .p_3()
-            .pt_0()
-            .flex()
-            .flex_grow()
-            .flex_col()
-            .gap_2()
             .child(
                 div()
                     .w_full()
-                    .bg(gpui::green())
+                    .bg(rgb(gui::colors::SECONDARY_BACKGROUND))
                     .group("top_menu")
                     .flex()
-                    .gap_2()
                     .py(px(2.))
                     .px_2()
-                    .child(
-                        div()
-                            .child(format!("Reset Board"))
-                            .text_xs()
-                            .text_color(gpui::white())
-                            .invisible()
-                            .group("top_menu")
-                            .group_hover("top_menu", |el| el.visible())
-                            .on_mouse_down(
-                                gpui::MouseButton::Left,
-                                cx.listener(move |board, _event, _window, cx| {
-                                    board.reset_board(cx);
-                                }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .child(format!("Load FEN"))
-                            .text_xs()
-                            .text_color(gpui::white())
-                            .invisible()
-                            .group("top_menu")
-                            .group_hover("top_menu", |el| el.visible())
-                            .on_mouse_down(
-                                gpui::MouseButton::Left,
-                                cx.listener(move |board, _event, _window, cx| {
-                                    board.is_load_fen_window_opened =
-                                        !board.is_load_fen_window_opened;
+                    .child(menu_button("Reset Board").on_any_mouse_down(cx.listener(
+                        |board, _, _, cx| {
+                            board.reset_board();
+                            cx.notify();
+                        },
+                    )))
+                    .child(menu_button("Load FEN").on_any_mouse_down(cx.listener(
+                        |_, _, _, cx| {
+                            let bounds = Bounds::centered(None, size(px(500.), px(150.)), cx);
+                            let options = WindowOptions {
+                                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                                ..Default::default()
+                            };
+
+                            let text_input = cx.new(|cx| InputField::new(cx));
+                            let input_controller = cx.new(|cx| InputController {
+                                recent_keystrokes: Vec::new(),
+                                focus_handle: cx.focus_handle(),
+                                text_input,
+                            });
+
+                            let window = cx
+                                .open_window(options, |_, cx| {
+                                    cx.new(|cx| FenWindow {
+                                        input_controller,
+                                        focus_handle: cx.focus_handle(),
+                                    })
+                                })
+                                .unwrap();
+
+                            let view = window.update(cx, |_, _, cx| cx.entity()).unwrap();
+                            cx.observe_keystrokes(move |_, ev, _, cx| {
+                                view.update(cx, |view, cx| {
+                                    view.input_controller
+                                        .as_mut(cx)
+                                        .recent_keystrokes
+                                        .push(ev.keystroke.clone());
                                     cx.notify();
-                                }),
-                            ),
-                    )
-                    .child(button("Omar", move |_, cx| {
-                        let bounds = Bounds::centered(None, size(px(500.), px(150.)), cx);
-                        let options = WindowOptions {
-                            window_bounds: Some(WindowBounds::Windowed(bounds)),
-                            ..Default::default()
-                        };
-
-                        let text_input = cx.new(|cx| InputField::new(cx));
-                        let input_controller = cx.new(|cx| InputController {
-                            recent_keystrokes: Vec::new(),
-                            focus_handle: cx.focus_handle(),
-                            text_input,
-                        });
-
-                        let window = cx
-                            .open_window(options, |_, cx| {
-                                cx.new(|cx| FenWindow {
-                                    input_controller,
-                                    focus_handle: cx.focus_handle(),
                                 })
                             })
-                            .unwrap();
-
-                        let view = window.update(cx, |_, _, cx| cx.entity()).unwrap();
-                        cx.observe_keystrokes(move |ev, _, cx| {
-                            view.update(cx, |view, cx| {
-                                view.input_controller.as_mut(cx).recent_keystrokes.push(ev.keystroke.clone());
-                                cx.notify();
+                            .detach();
+                            cx.on_keyboard_layout_change({
+                                move |cx| {
+                                    window.update(cx, |_, _, cx| cx.notify()).ok();
+                                }
                             })
-                        })
-                        .detach();
-                        cx.on_keyboard_layout_change({
-                            move |cx| {
-                                window.update(cx, |_, _, cx| cx.notify()).ok();
-                            }
-                        })
-                        .detach();
-
-                        // window
-                        //     .update(cx, |view, window, cx| {
-                        //         window.focus(&view.input_controller.as_mut(cx).text_input.focus_handle(cx));
-                        //         cx.activate(true);
-                        //     })
-                        //     .unwrap();
-                    })),
+                            .detach();
+                        },
+                    ))),
             )
             .child(
                 div()
-                    .w(px(8. * 40.))
-                    .h(px(8. * 40.))
-                    .grid()
-                    .grid_cols(8)
-                    .grid_rows(8)
-                    .children(squares),
-            )
-            .child(
-                div()
-                    .h(px(10.))
-                    .w_full()
-                    .rounded_md()
-                    .bg(rgb(0x262421))
+                    .size_full()
+                    .p_3()
+                    .pt_0()
                     .flex()
-                    .flex_row()
+                    .flex_grow()
+                    .flex_col()
                     .gap_2()
-                    .items_center()
-                    .justify_between()
-                    .p_1()
-                    .child(format!("Analyze board"))
-                    .text_color(gpui::white())
-                    .on_any_mouse_down(cx.listener(move |board, _event, _window, cx| {
-                        board.analyze(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("analysis")
-                    .overflow_y_scroll()
-                    .w_full()
-                    .h_1_3()
-                    .bg(rgb(gui::colors::SECONDARY_BACKGROUND))
-                    .rounded_md()
-                    .p_1()
-                    .gap_neg_112()
-                    .child(format!("analysis"))
-                    .text_color(gpui::white())
-                    .children(
-                        self.analysis
-                            .iter()
-                            .rev()
-                            .map(|x| div().child(x.clone()).text_color(gpui::white()).text_sm()),
-                    ),
+                    .child(
+                        div()
+                            .w(px(8. * 40.))
+                            .h(px(8. * 40.))
+                            .grid()
+                            .grid_cols(8)
+                            .grid_rows(8)
+                            .children(squares),
+                    ) //
+                    .child(
+                        div()
+                            .h(px(10.))
+                            .w_full()
+                            .rounded_md()
+                            .bg(rgb(0x262421))
+                            .flex()
+                            .flex_row()
+                            .gap_2()
+                            .items_center()
+                            .justify_between()
+                            .p_1()
+                            .child(format!("Analyze board"))
+                            .text_color(gpui::white())
+                            .on_any_mouse_down(cx.listener(move |board, _event, _window, cx| {
+                                board.analyze(cx);
+                            })),
+                    ) //
+                    .child(
+                        div()
+                            .id("analysis")
+                            .overflow_y_scroll()
+                            .w_full()
+                            .h_1_3()
+                            .bg(rgb(gui::colors::SECONDARY_BACKGROUND))
+                            .rounded_md()
+                            .p_1()
+                            .gap_neg_112()
+                            .child(format!("analysis"))
+                            .text_color(gpui::white())
+                            .children(self.analysis.iter().rev().map(|x| {
+                                div().child(x.clone().replace("\n", "")).text_color(gpui::white()).text_sm()
+                            })),
+                    ), //
             )
     }
 }
@@ -444,7 +408,7 @@ fn main() {
     Application::new().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(500.), px(500.0)), cx);
 
-        cx.set_global(SharedState {fen_string: None});
+        cx.set_global(SharedState { fen_string: None });
 
         cx.bind_keys([
             KeyBinding::new("backspace", Backspace, None),
@@ -490,4 +454,20 @@ fn button(text: &str, on_click: impl Fn(&mut Window, &mut App) + 'static) -> imp
         .cursor_pointer()
         .child(text.to_string())
         .on_any_mouse_down(move |_, window, cx| on_click(window, cx))
+}
+
+fn menu_button(text: &str) -> impl IntoElement + InteractiveElement {
+    div()
+        .flex_none()
+        .px(px(2.))
+        .hover(|this| this.bg(gpui::white()))
+        .font_weight(FontWeight::MEDIUM)
+        .text_xs()
+        .border(px(1.))
+        .border_color(gpui::black())
+        .bg(rgb(gui::colors::TEXT))
+        .text_color(rgb(gui::colors::BACKGROUND))
+        .cursor_pointer()
+        .child(text.to_string())
+    // .on_any_mouse_down(move |_, window, cx| on_click(window, cx))
 }
