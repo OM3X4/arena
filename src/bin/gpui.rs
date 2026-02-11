@@ -108,7 +108,11 @@ impl Board {
                 .into_iter()
                 .collect();
             self.available_moves = avail_squares;
-            self.selected_square = Some(square);
+            if self.board.piece_at[square as usize].is_some() {
+                self.selected_square = Some(square);
+            } else {
+                self.selected_square = None;
+            }
         }
     } //
 
@@ -375,6 +379,7 @@ impl Render for Board {
                             .children(squares)
                             .on_mouse_down_out(cx.listener(|board, _, _, cx| {
                                 board.selected_square = None;
+                                cx.notify();
                             }))
                     ) //
                     .child(
