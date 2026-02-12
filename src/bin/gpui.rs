@@ -469,22 +469,24 @@ impl Render for Board {
                                         cx.notify();
                                     })),
                             )
-                            .child(div().bg(gpui::green()).min_w_1_3())
+                            .child(div().bg(gpui::green()))
                     ) //
                     .child(
                         div()
-                            .h(px(10.))
-                            .w_full()
-                            .rounded_md()
-                            .bg(rgb(0x262421))
+                            .size(px(30.))
+                            .rounded_sm()
+                            .bg(rgb(gui::colors::TEXT))
                             .flex()
-                            .flex_row()
                             .gap_2()
                             .items_center()
                             .justify_between()
-                            .p_1()
-                            .child(format!("Analyze board"))
-                            .text_color(gpui::white())
+                            .p(px(0.5))
+                            .child(
+                                img(Path::new("C:/Learn/LearnRust/Chess Arena/arena/svg/brain.svg")).size_full()
+                            )
+                            .hover(|this| this.bg(gpui::white()))
+                            .cursor_pointer()
+                            .text_color(gpui::black())
                             .on_any_mouse_down(cx.listener(move |board, _event, _window, cx| {
                                 board.analyze(cx);
                             })),
