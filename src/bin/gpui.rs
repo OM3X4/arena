@@ -17,6 +17,69 @@ use queenfish::board::bishop_magic::init_bishop_magics;
 use queenfish::board::rook_magic::init_rook_magics;
 use std::{collections::HashSet, path::Path};
 
+enum AnalysisLine {
+    Move(String),
+    Depth {
+        depth: i32,
+        selective_depth: Option<i32>,
+        score: Option<i32>,
+        best_move: String,
+        nodes: Option<i32>,
+        time: Option<i32>,
+    }
+}
+impl AnalysisLine {
+    fn new(line: String) -> Option<AnalysisLine> {
+        let line = line.trim().replace("\n", "");
+        let args = line.split_whitespace().collect::<Vec<_>>();
+        dbg!(&args);
+        if line.starts_with("bestmove") {
+            return Some(AnalysisLine::Move(args[1].to_string()));
+        } else if line.starts_with("info") {
+            let mut depth = None;
+            let mut nodes = None;
+            let mut best_move = None;
+            let mut time = None;
+            let mut score = None;
+
+            let depth_index = args.iter().position(|str| str == &"depth");
+            if let Some(depth_index) = depth_index {
+                if let Some(depth_str) = args.get(depth_index + 1) {
+                    depth = Some(depth_str.parse::<i32>().unwrap());
+                }
+            }
+            let score_index = args.iter().position(|str| str == &"cp" || str == &"mate");
+            if let Some(score_index) = score_index {
+                if let Some(score_str) = args.get(score_index + 1) {
+                    score = Some(score_str.parse::<i32>().unwrap());
+                }
+            }
+            let nodes_index = args.iter().position(|str| str == &"nodes");
+            if let Some(nodes_index) = nodes_index {
+                if let Some(nodes_str) = args.get(nodes_index + 1) {
+                    nodes = Some(nodes_str.parse::<i32>().unwrap());
+                }
+            }
+            let best_move_index = args.iter().position(|str| str == &"pv");
+            if let Some(best_move_index) = best_move_index {
+                if let Some(best_move_str) = args.get(best_move_index + 1) {
+                    best_move = Some(best_move_str.to_string());
+                }
+            }
+            let time_index = args.iter().position(|str| str == &"time");
+            if let Some(time_index) = time_index {
+                if let Some(time_str) = args.get(time_index + 1) {
+                    time = Some(time_str.parse::<i32>().unwrap());
+                }
+            }
+
+            return Some(AnalysisLine::Depth { depth: depth.unwrap_or(0), selective_depth: None, score, best_move: best_move.unwrap_or("None".to_string()), nodes, time });
+        }
+        None
+    }
+}
+
+
 pub struct SharedState {
     fen_string: Option<SharedString>,
 }
@@ -64,7 +127,7 @@ struct Board {
     board: QueenFishBoard,
     focus_handle: gpui::FocusHandle,
     available_moves: Vec<(u8, u8)>,
-    analysis: Vec<String>,
+    analysis: Vec<AnalysisLine>,
     engine_handle: Option<EngineHandle>,
     is_analyzing: bool,
     selected_square: Option<u8>,
@@ -120,11 +183,14 @@ impl Board {
 
     pub fn analyze(&mut self, cx: &mut Context<Self>) {
         let Some(handle) = self.engine_handle.as_mut() else {
-            eprintln!("engine handle missing");
+            println!("engine handle missing");
             return;
         };
 
+        println!("Analyzing");
+
         if self.is_analyzing {
+            println!("Stopping analysis");
             handle.send_command("stop\n");
             self.analysis.clear();
             self.is_analyzing = false;
@@ -132,6 +198,10 @@ impl Board {
             handle.send_command("stop\n");
             self.analysis.clear();
             self.is_analyzing = true;
+            dbg!(self.board.to_fen());
+            let command = format!("position fen {} 0 1\n", self.board.to_fen());
+            handle.send_command(&command);
+            handle.send_command("go\n");
         }
 
         cx.notify();
@@ -163,8 +233,12 @@ impl Board {
     pub fn poll_engine(&mut self, cx: &mut Context<Self>) {
         if let Some(handle) = self.engine_handle.as_mut() {
             while let Some(line) = handle.try_read_line() {
-                self.analysis.push(line);
-                cx.notify();
+                println!("polling engine");
+                if let Some(analysis) = AnalysisLine::new(line) {
+                    self.analysis.push(analysis);
+                    cx.notify();
+                }
+                // self.analysis.push(line);
             }
         }
     } //
@@ -181,7 +255,7 @@ impl Board {
 
     pub fn load_from_fen(&mut self, fen: String) {
         self.board.load_from_fen(fen.as_str());
-    }
+    } //
 }
 
 impl Render for Board {
@@ -428,10 +502,25 @@ impl Render for Board {
                             .child(format!("analysis"))
                             .text_color(gpui::white())
                             .children(self.analysis.iter().rev().map(|x| {
-                                div()
-                                    .child(x.clone().replace("\n", ""))
-                                    .text_color(gpui::white())
-                                    .text_sm()
+                                match x {
+                                    AnalysisLine::Move(m) => {
+                                        return div()
+                                            .flex()
+                                            .flex_row()
+                                            .gap_2()
+                                            .items_center()
+                                            .child(format!("Best Move Ma Nigga: {}", m))
+                                            .text_color(gpui::white())
+                                    },
+                                    AnalysisLine::Depth { depth, score , ..} => {
+                                        return div()
+                                            .child(format!("Depth: {}, Score: {}", depth, score.unwrap_or(0)))
+                                    }
+                                }
+                                // div()
+                                //     .child(x.clone()..replace("\n", ""))
+                                //     .text_color(gpui::white())
+                                //     .text_sm()
                             })),
                     ), //
             ) //
