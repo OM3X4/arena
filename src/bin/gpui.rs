@@ -12,10 +12,10 @@ use gpui::{
     SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, div, img, prelude::*, px,
     rgb, size,
 };
-use queenfish::board::Board as QueenFishBoard;
 use queenfish::board::Move;
 use queenfish::board::bishop_magic::init_bishop_magics;
 use queenfish::board::rook_magic::init_rook_magics;
+use queenfish::board::{Board as QueenFishBoard, UnMakeMove};
 use std::{collections::HashSet, path::Path};
 
 enum AnalysisLine {
@@ -133,6 +133,9 @@ struct Board {
     engine_handle: Option<EngineHandle>,
     is_analyzing: bool,
     selected_square: Option<u8>,
+    unmake_move_history: Vec<UnMakeMove>,
+    make_move_history: Vec<Move>,
+    current_move_index: usize,
 }
 
 impl Focusable for Board {
@@ -142,6 +145,7 @@ impl Focusable for Board {
 }
 
 impl Board {
+
     pub fn select_square(&mut self, square: u8) {
         let moves = self.board.generate_moves();
         let available_squares = self
@@ -163,7 +167,7 @@ impl Board {
                 .iter()
                 .find(|mv| (mv.from() as u8, mv.to() as u8) == *selected_mv)
                 .unwrap();
-            self.board.make_move(*mv);
+            self.play_move(mv.to_uci());
             self.available_moves = Vec::new();
             return;
         } else {
@@ -222,6 +226,9 @@ impl Board {
             engine_handle: Some(engine_handle),
             is_analyzing: false,
             selected_square: None,
+            unmake_move_history: Vec::new(),
+            make_move_history: Vec::new(),
+            current_move_index: 0,
         };
 
         return element;
@@ -241,6 +248,9 @@ impl Board {
     pub fn reset_board(&mut self) {
         self.board = QueenFishBoard::new();
         self.available_moves = Vec::new();
+        self.current_move_index = 0;
+        self.make_move_history = Vec::new();
+        self.unmake_move_history = Vec::new();
         if let Some(handle) = self.engine_handle.as_mut() {
             handle.send_command("stop\n");
         }
@@ -257,7 +267,36 @@ impl Board {
         self.analysis.clear();
         self.engine_handle.as_mut().unwrap().send_command("stop\n");
         let mv = Move::from_uci(mv.as_str(), &(self.board));
+        let unmakemove = self.board.make_move(mv);
+        self.make_move_history.push(mv);
+        self.unmake_move_history.push(unmakemove);
+        self.current_move_index += 1;
+    }
+    pub fn move_forward(&mut self) {
+        println!("move forward {}", self.current_move_index);
+        println!("{:?}", self.make_move_history.iter().map(|mv| mv.to_uci()).collect::<Vec<String>>());
+        if self.current_move_index as i32 > (self.make_move_history.len() as i32) - 1 {
+            return;
+        }
+        self.is_analyzing = false;
+        self.analysis.clear();
+        self.engine_handle.as_mut().unwrap().send_command("stop\n");
+        let mv = self.make_move_history[self.current_move_index];
         self.board.make_move(mv);
+        self.current_move_index += 1;
+    }
+    pub fn undo_move(&mut self) {
+        println!("undo move {}", self.current_move_index);
+        if self.current_move_index <= 0 {
+            return;
+        }
+        let current_move_index = self.current_move_index - 1;
+        self.is_analyzing = false;
+        self.analysis.clear();
+        self.engine_handle.as_mut().unwrap().send_command("stop\n");
+        let unmake = self.unmake_move_history[current_move_index];
+        self.board.unmake_move(unmake);
+        self.current_move_index -= 1;
     }
 }
 
@@ -469,26 +508,77 @@ impl Render for Board {
                     ) //
                     .child(
                         div()
-                            .size(px(30.))
-                            .rounded_sm()
-                            .bg(rgb(gui::colors::TEXT))
-                            .flex()
-                            .gap_2()
-                            .items_center()
-                            .justify_between()
-                            .p(px(0.5))
-                            .child(
-                                img(Path::new(
-                                    "C:/Learn/LearnRust/Chess Arena/arena/svg/brain.svg",
-                                ))
-                                .size_full(),
-                            )
-                            .hover(|this| this.bg(gpui::white()))
-                            .cursor_pointer()
-                            .text_color(gpui::black())
-                            .on_any_mouse_down(cx.listener(move |board, _event, _window, cx| {
-                                board.analyze(cx);
-                            })),
+                        .flex()
+                        .gap_2()
+                        .child(
+                            div()
+                                .size(px(30.))
+                                .rounded_sm()
+                                .bg(rgb(gui::colors::TEXT))
+                                .flex()
+                                .gap_2()
+                                .items_center()
+                                .justify_between()
+                                .p(px(0.5))
+                                .child(
+                                    img(Path::new(
+                                        "C:/Learn/LearnRust/Chess Arena/arena/svg/brain.svg",
+                                    ))
+                                    .size_full(),
+                                )
+                                .hover(|this| this.bg(gpui::white()))
+                                .cursor_pointer()
+                                .text_color(gpui::black())
+                                .on_any_mouse_down(cx.listener(move |board, _event, _window, cx| {
+                                    board.analyze(cx);
+                                }))
+                        )
+                        .child(
+                            div()
+                                .size(px(30.))
+                                .rounded_sm()
+                                .bg(rgb(gui::colors::TEXT))
+                                .flex()
+                                .gap_2()
+                                .items_center()
+                                .justify_between()
+                                .p(px(0.5))
+                                .child(
+                                    img(Path::new(
+                                        "C:/Learn/LearnRust/Chess Arena/arena/svg/brain.svg",
+                                    ))
+                                    .size_full(),
+                                )
+                                .hover(|this| this.bg(gpui::white()))
+                                .cursor_pointer()
+                                .text_color(gpui::black())
+                                .on_any_mouse_down(cx.listener(move |board, _event, _window, cx| {
+                                    board.undo_move();
+                                }))
+                        )
+                        .child(
+                            div()
+                                .size(px(30.))
+                                .rounded_sm()
+                                .bg(rgb(gui::colors::TEXT))
+                                .flex()
+                                .gap_2()
+                                .items_center()
+                                .justify_between()
+                                .p(px(0.5))
+                                .child(
+                                    img(Path::new(
+                                        "C:/Learn/LearnRust/Chess Arena/arena/svg/brain.svg",
+                                    ))
+                                    .size_full(),
+                                )
+                                .hover(|this| this.bg(gpui::white()))
+                                .cursor_pointer()
+                                .text_color(gpui::black())
+                                .on_any_mouse_down(cx.listener(move |board, _event, _window, cx| {
+                                    board.move_forward();
+                                }))
+                        )
                     ) //
                     .child(
                         div()
@@ -509,68 +599,77 @@ impl Render for Board {
                             .child(seperator(gui::colors::MUTED))
                             .child(
                                 div()
-                                .px_4()
-                                .when(!self.is_analyzing, |this| this.hidden())
-                                .children(self.analysis.iter().rev().map(|x: &AnalysisLine| {
-                                match x {
-                                    AnalysisLine::Move(m) => {
-                                        let mv = m.clone();
-                                        return div()
-                                            .flex()
-                                            .flex_row()
-                                            .gap_2()
-                                            .items_center()
-                                            .child(format!("Best Move: {}", m))
-                                            .child(
-                                                button("Play This Move").on_any_mouse_down(
-                                                cx.listener(move |board, _, _, cx| {
-                                                    board.play_move(
-                                                        mv.split(" ").collect::<Vec<_>>()[0]
-                                                            .to_string(),
-                                                    );
-                                                    cx.notify();
-                                                }),
-                                            ))
-                                            .text_color(gpui::white());
-                                    }
-                                    AnalysisLine::Depth {
-                                        depth,
-                                        score,
-                                        best_move: _best_move,
-                                        nodes,
-                                        selective_depth,
-                                        time,
-                                    } => div().child(
-                                        div().flex().children(
-                                            [
-                                                (depth, 30),
-                                                (score, 50),
-                                                (nodes, 80),
-                                                (time, 80),
-                                                (selective_depth, 20),
-                                            ]
-                                            .iter()
-                                            .filter(|x| x.0.is_some())
-                                            .map(|x| {
-                                                div()
-                                                    .flex()
-                                                    .flex_row()
-                                                    .gap_2()
-                                                    .items_center()
-                                                    .w(px(x.1 as f32))
-                                                    .px_2()
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .child(x.0.clone().unwrap())
-                                                    .text_color(gpui::white())
-                                                    .border_r_1()
-                                                    .border_color(rgb(gui::colors::MUTED))
-                                            }),
-                                        ),
-                                    ), // .child(seperator(gui::colors::BACKGROUND)),
-                                }
-                            }))),
+                                    .px_4()
+                                    .when(!self.is_analyzing, |this| this.hidden())
+                                    .children(self.analysis.iter().rev().map(
+                                        |x: &AnalysisLine| {
+                                            match x {
+                                                AnalysisLine::Move(m) => {
+                                                    let mv = m.clone();
+                                                    return div()
+                                                        .flex()
+                                                        .flex_row()
+                                                        .gap_2()
+                                                        .items_center()
+                                                        .child(format!("Best Move: {}", m))
+                                                        .child(
+                                                            button("Play This Move")
+                                                                .on_any_mouse_down(cx.listener(
+                                                                    move |board, _, _, cx| {
+                                                                        board.play_move(
+                                                                            mv.split(" ")
+                                                                                .collect::<Vec<_>>(
+                                                                                )[0]
+                                                                            .to_string(),
+                                                                        );
+                                                                        cx.notify();
+                                                                    },
+                                                                )),
+                                                        )
+                                                        .text_color(gpui::white());
+                                                }
+                                                AnalysisLine::Depth {
+                                                    depth,
+                                                    score,
+                                                    best_move: _best_move,
+                                                    nodes,
+                                                    selective_depth,
+                                                    time,
+                                                } => div().child(
+                                                    div().flex().children(
+                                                        [
+                                                            (depth, 30),
+                                                            (score, 50),
+                                                            (nodes, 80),
+                                                            (time, 80),
+                                                            (selective_depth, 20),
+                                                        ]
+                                                        .iter()
+                                                        .filter(|x| x.0.is_some())
+                                                        .map(|x| {
+                                                            div()
+                                                                .flex()
+                                                                .flex_row()
+                                                                .gap_2()
+                                                                .items_center()
+                                                                .w(px(x.1 as f32))
+                                                                .px_2()
+                                                                .flex()
+                                                                .items_center()
+                                                                .justify_center()
+                                                                .child(x.0.clone().unwrap())
+                                                                .text_color(gpui::white())
+                                                                .border_r_1()
+                                                                .border_color(rgb(
+                                                                    gui::colors::MUTED,
+                                                                ))
+                                                        }),
+                                                    ),
+                                                ), // .child(seperator(gui::colors::BACKGROUND)),
+                                            }
+                                        },
+                                    )),
+                            ),
                     ), //
             ) //
     }
