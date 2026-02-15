@@ -686,7 +686,7 @@ impl Render for Board {
                             .gap_2()
                             .child(
                                 logo_button(
-                                    "C:/Learn/LearnRust/Chess Arena/arena/svg/brain.svg",
+                                    "svg/brain.svg",
                                     0.,
                                 )
                                 .on_any_mouse_down(cx.listener(
@@ -700,7 +700,7 @@ impl Render for Board {
                             )
                             .child(
                                 logo_button(
-                                    "C:/Learn/LearnRust/Chess Arena/arena/svg/chevron-left.svg",
+                                    "svg/chevron-left.svg",
                                     8.,
                                 )
                                 .on_any_mouse_down(cx.listener(
@@ -711,11 +711,11 @@ impl Render for Board {
                             )
                             .child(
                                 logo_button(
-                                    "C:/Learn/LearnRust/Chess Arena/arena/svg/chevron-right.svg",
+                                    "svg/chevron-right.svg",
                                     8.,
                                 )
                                 .on_any_mouse_down(cx.listener(
-                                    move |board, _event, _window, cx| {
+                                    move |board, _event, _window, _cx| {
                                         board.move_forward();
                                     },
                                 )),
