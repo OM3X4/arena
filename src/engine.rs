@@ -94,6 +94,7 @@ pub struct Engine {
     pub engine_options: Vec<EngineOption>,
     pub engine_handle: Option<EngineHandle>,
     pub analysis: Vec<AnalysisLine>,
+    pub is_show: bool,
 } //
 
 impl Clone for Engine {
@@ -104,6 +105,7 @@ impl Clone for Engine {
             engine_options: self.engine_options.clone(),
             engine_handle: None,
             analysis: Vec::new(),
+            is_show: true,
         }
     }
 }
@@ -169,6 +171,7 @@ impl Engine {
             engine_options: Vec::new(),
             engine_handle: None,
             analysis: Vec::new(),
+            is_show: true,
         };
         engine.engine_options = engine.detect_engine_options();
 
@@ -236,7 +239,6 @@ impl Engine {
     } //
 
     pub fn send_command(&mut self, command: &str) {
-        println!("Sending command: {} by engine {}", command, self.name);
         if self.engine_handle.is_none() {
             self.spawn_handle();
         }
@@ -330,8 +332,12 @@ impl Engine {
     } //
 
     pub fn disconnect(&mut self) {
-        self.send_command("quit\n");
-    } //
+        println!("disconnecting engine");
+        if let Some(handle) = self.engine_handle.as_mut() {
+            handle.process.kill().ok();
+            handle.process.wait().ok();
+        }
+    }
 
     pub fn poll_engine(&mut self) {
         if let Some(handle) = self.engine_handle.as_mut() {

@@ -8,7 +8,7 @@ use arena::gui::input::{
 };
 use arena::{AnalysisLine, Engine, EngineOption, gui};
 use gpui::{
-    App, Application, AsyncApp, AsyncWindowContext, Bounds, Context, Corner, Div, ElementId, Entity, Focusable, FontWeight, Global, KeyBinding, MouseButton, SharedString, Stateful, TitlebarOptions, Window, WindowBounds, WindowOptions, anchored, deferred, div, img, prelude::*, px, rgb, size
+    App, Application, AsyncApp, Bounds, Context, Corner, Div, ElementId, Entity, Focusable, FontWeight, Global, KeyBinding, MouseButton, SharedString, Stateful, TitlebarOptions, Window, WindowBounds, WindowOptions, anchored, deferred, div, img, prelude::*, px, rgb, size
 };
 use queenfish::board::Move;
 use queenfish::board::bishop_magic::init_bishop_magics;
@@ -69,6 +69,7 @@ impl Render for EngineOptionsWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let engine = &mut cx.global_mut::<SharedState>().engines.engines[self.engine_index];
         let engine_options = engine.engine_options.clone();
+        let engine_is_show = engine.is_show;
 
         let options = engine_options
             .iter()
@@ -134,6 +135,17 @@ impl Render for EngineOptionsWindow {
             .py_8()
             .px_6()
             .child(format!("Engine Options:"))
+            .child(
+                div()
+                    .text_base()
+                    .child("Show Analysis")
+                    .child(check_box(engine_is_show))
+                    .on_any_mouse_down(cx.listener(|engine_options_window, _, _, cx| {
+                        let engine = &mut cx.global_mut::<SharedState>().engines.engines[engine_options_window.engine_index];
+                        engine.is_show = !engine.is_show;
+                        cx.notify();
+                    }))
+            )
             .child(
                 div()
                     .px_2()
@@ -339,12 +351,13 @@ impl Render for Board {
             .engines
             .engines
             .iter()
+            .filter(|engine| engine.is_show)
             .map(|engine| {
                 return div()
                     .id(ElementId::named_usize(engine.name.clone(), 0))
                     .overflow_y_scroll()
                     .w_full()
-                    .h_full()
+                    .flex_1()
                     .bg(rgb(gui::colors::SECONDARY_BACKGROUND))
                     .rounded_sm()
                     .py_1()
@@ -696,7 +709,6 @@ impl Render for Board {
                     .p_3()
                     .pt_0()
                     .flex()
-                    .flex_grow()
                     .flex_col()
                     .gap_2()
                     .child(
@@ -742,10 +754,12 @@ impl Render for Board {
                     ) //
                     .child(
                         div()
-                            .size_full()
+                            .flex_1()
+                            .w_full()
+                            .mb_5()
                             .flex()
                             .flex_col()
-                            .gap_2()
+                            .gap_1()
                             .children(analysis), //
                     ), //
             ) //
@@ -757,7 +771,7 @@ fn main() {
     init_rook_magics();
 
     Application::new().run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(500.), px(500.0)), cx);
+        let bounds = Bounds::centered(None, size(px(600.), px(600.0)), cx);
 
         let engines = vec![
             Engine::new(
@@ -806,6 +820,10 @@ fn main() {
         )
         .unwrap();
         cx.activate(true);
+        cx.on_window_closed(|cx| {
+            let engines = &mut cx.global_mut::<SharedState>().engines.engines;
+            engines.iter_mut().for_each(|e| e.disconnect());
+        }).detach();
     });
 }
 
