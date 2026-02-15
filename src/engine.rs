@@ -170,6 +170,8 @@ impl Engine {
             engine_handle: None,
             analysis: Vec::new(),
         };
+        engine.engine_options = engine.detect_engine_options();
+
         engine
     } //
 
@@ -192,7 +194,6 @@ impl Engine {
                 .take()
                 .expect("Failed to take engine stdout"),
         );
-        self.detect_engine_options();
 
         // stdin writer task
         thread::spawn(move || {
@@ -235,6 +236,7 @@ impl Engine {
     } //
 
     pub fn send_command(&mut self, command: &str) {
+        println!("Sending command: {} by engine {}", command, self.name);
         if self.engine_handle.is_none() {
             self.spawn_handle();
         }
@@ -261,8 +263,10 @@ impl Engine {
     } //
 
     pub fn detect_engine_options(&mut self) -> Vec<EngineOption> {
+        println!("detecting engine options");
         if self.engine_handle.is_none() {
-            return vec![];
+            self.spawn_handle();
+            // return vec![];
         }
         self.send_command("uci\n");
         let mut options = vec![];

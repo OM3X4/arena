@@ -6,15 +6,16 @@ use arena::gui::input::{
     Backspace, Copy, Cut, Delete, End, Home, InputController, InputField, Left, Paste, Right,
     SelectAll, SelectLeft, SelectRight, ShowCharacterPalette,
 };
-use arena::{Engine, EngineOption, gui, AnalysisLine};
+use arena::{AnalysisLine, Engine, EngineOption, gui};
 use gpui::{
-    App, Application, Bounds, Context, ElementId, Entity, Focusable, FontWeight, Global, KeyBinding, SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, div, img, prelude::*, px, rgb, size
+    App, Application, Bounds, Context, Corner, Div, ElementId, Entity, Focusable, FontWeight,
+    Global, KeyBinding, SharedString, Stateful, TitlebarOptions, Window, WindowBounds,
+    WindowOptions, anchored, deferred, div, img, prelude::*, px, rgb, size,
 };
 use queenfish::board::Move;
 use queenfish::board::bishop_magic::init_bishop_magics;
 use queenfish::board::rook_magic::init_rook_magics;
 use queenfish::board::{Board as QueenFishBoard, UnMakeMove};
-use std::sync::mpsc::Sender;
 use std::{collections::HashSet, path::Path};
 
 pub struct EnginesServices {
@@ -34,12 +35,10 @@ impl EnginesServices {
 
         if self.is_analyzing {
             self.is_analyzing = false;
-            self.engines
-                .iter_mut()
-                .for_each(|engine| {
-                    engine.send_command("stop\n");
-                    engine.analysis.clear();
-                });
+            self.engines.iter_mut().for_each(|engine| {
+                engine.send_command("stop\n");
+                engine.analysis.clear();
+            });
             return;
         }
         self.is_analyzing = true;
@@ -54,7 +53,6 @@ impl EnginesServices {
         self.engines
             .iter_mut()
             .for_each(|engine| engine.poll_engine());
-
     }
 }
 
@@ -65,59 +63,64 @@ pub struct SharedState {
 impl Global for SharedState {}
 
 struct EngineOptionsWindow {
-    engine_tx: Sender<String>,
-    focus_handle: gpui::FocusHandle,
-    options: Vec<EngineOption>,
+    engine_index: usize,
 } //
 
 impl Render for EngineOptionsWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let options = self.options.iter().map(|option| match option {
-            EngineOption::CHECK { name, value } => {
-                let value = *value;
-                let name = name.clone();
-                div()
-                    .flex()
-                    .gap_2()
-                    .items_center()
-                    .child(name.clone())
-                    .child(check_box(value).on_any_mouse_down(cx.listener(
-                        move |engine_options_window, _, _, cx| {
-                            let engine_tx = engine_options_window.engine_tx.clone();
-                            if let Some(option) =
-                                engine_options_window.options.iter_mut().find(|o| match o {
-                                    EngineOption::CHECK {
-                                        name: name_inner, ..
-                                    } => *name_inner == name,
-                                    _ => false,
-                                })
-                            {
-                                if let EngineOption::CHECK { value, .. } = option {
-                                    *value = !*value;
-                                }
-                            }
-                            let _ = engine_tx.send(format!(
-                                "setoption name {} value {}\n",
-                                name.clone(),
-                                !(value)
-                            ));
-                            cx.notify();
-                        },
-                    )))
-            }
-            EngineOption::SPIN {
-                name,
-                value,
-                min,
-                max,
-            } => div().child(format!(
-                "{}: {} ({}/{})",
-                name,
-                value,
-                min.unwrap_or(0),
-                max.unwrap_or(0)
-            )),
-        });
+        let engine = &mut cx.global_mut::<SharedState>().engines.engines[self.engine_index];
+        let engine_options = engine.engine_options.clone();
+
+        let options = engine_options
+            .iter()
+            .enumerate()
+            .map(|(index, option)| match option {
+                EngineOption::CHECK { name, value } => {
+                    let value = *value;
+                    let name = name.clone();
+                    div()
+                        .flex()
+                        .gap_2()
+                        .items_center()
+                        .child(name.clone())
+                        .child(check_box(value).on_any_mouse_down(cx.listener(
+                            move |engine_options_window, _, _, cx| {
+                                let state: &mut SharedState = cx.global_mut::<SharedState>();
+                                let engine =
+                                    &mut state.engines.engines[engine_options_window.engine_index];
+
+                                let (name, new_value) = {
+                                    let option = &mut engine.engine_options[index];
+
+                                    match option {
+                                        EngineOption::CHECK { value, name } => {
+                                            *value = !*value;
+                                            (name.clone(), *value)
+                                        }
+                                        _ => return,
+                                    }
+                                }; // ← option borrow ends here
+                                let _ = engine.send_command(
+                                    format!("setoption name {} value {}\n", name, new_value)
+                                        .as_str(),
+                                );
+                                cx.notify();
+                            },
+                        )))
+                }
+                EngineOption::SPIN {
+                    name,
+                    value,
+                    min,
+                    max,
+                } => div().child(format!(
+                    "{}: {} ({}/{})",
+                    name,
+                    value,
+                    min.unwrap_or(0),
+                    max.unwrap_or(0)
+                )),
+            });
         div()
             .id("engine_options_window")
             .overflow_y_scroll()
@@ -186,6 +189,7 @@ struct Board {
     unmake_move_history: Vec<UnMakeMove>,
     make_move_history: Vec<Move>,
     current_move_index: usize,
+    is_engines_menu_open: bool,
 }
 
 impl Focusable for Board {
@@ -204,7 +208,6 @@ impl Board {
             .collect::<Vec<_>>();
         if available_squares.contains(&square) {
             self.selected_square = None;
-            // self.engine_handle.as_mut().unwrap().send_command("stop\n");
 
             let selected_mv = self
                 .available_moves
@@ -238,11 +241,6 @@ impl Board {
     pub fn new(focus_handle: gpui::FocusHandle) -> Self {
         let board = QueenFishBoard::new();
 
-        let engine = Engine::new(
-            "C:\\Learn\\LearnRust\\chess\\target\\release\\uci.exe",
-            "Queenfish 2",
-        );
-
         let element = Board {
             board,
             focus_handle,
@@ -254,6 +252,7 @@ impl Board {
             unmake_move_history: Vec::new(),
             make_move_history: Vec::new(),
             current_move_index: 0,
+            is_engines_menu_open: false,
         };
 
         return element;
@@ -337,75 +336,79 @@ impl Render for Board {
         }
         global.engines.poll_engines();
 
-
-        let analysis = global.engines.engines.iter().map(|engine| {
-            return div()
-                .id(ElementId::named_usize(engine.name.clone(), 0))
-                .overflow_y_scroll()
-                .w_full()
-                .h_full()
-                .bg(rgb(gui::colors::SECONDARY_BACKGROUND))
-                .rounded_sm()
-                .py_1()
-                .px_4()
-                .text_color(gpui::white())
-                .child(div().child(engine.name.clone()))
-                .child(seperator(gui::colors::MUTED))
-                .child(
-                    div()
-                        .px_4()
-                        // .when(!self.is_analyzing, |this| this.hidden())
-                        .children(engine.analysis.iter().rev().map(|x| {
-                            match x {
-                                AnalysisLine::Move(m) => {
-                                    return div()
-                                        .flex()
-                                        .flex_row()
-                                        .gap_2()
-                                        .items_center()
-                                        .child(format!("Best Move: {}", m))
-                                        .text_color(gpui::white());
+        let analysis = global
+            .engines
+            .engines
+            .iter()
+            .map(|engine| {
+                return div()
+                    .id(ElementId::named_usize(engine.name.clone(), 0))
+                    .overflow_y_scroll()
+                    .w_full()
+                    .h_full()
+                    .bg(rgb(gui::colors::SECONDARY_BACKGROUND))
+                    .rounded_sm()
+                    .py_1()
+                    .px_4()
+                    .text_color(gpui::white())
+                    .child(div().child(engine.name.clone()))
+                    .child(seperator(gui::colors::MUTED))
+                    .child(
+                        div()
+                            .px_4()
+                            // .when(!self.is_analyzing, |this| this.hidden())
+                            .children(engine.analysis.iter().rev().map(|x| {
+                                match x {
+                                    AnalysisLine::Move(m) => {
+                                        return div()
+                                            .flex()
+                                            .flex_row()
+                                            .gap_2()
+                                            .items_center()
+                                            .child(format!("Best Move: {}", m))
+                                            .text_color(gpui::white());
+                                    }
+                                    AnalysisLine::Depth {
+                                        depth,
+                                        score,
+                                        best_move: _best_move,
+                                        nodes,
+                                        selective_depth,
+                                        time,
+                                    } => div().child(
+                                        div().flex().children(
+                                            [
+                                                (depth, 30),
+                                                (score, 50),
+                                                (nodes, 80),
+                                                (time, 80),
+                                                (selective_depth, 20),
+                                            ]
+                                            .iter()
+                                            .filter(|x| x.0.is_some())
+                                            .map(|x| {
+                                                div()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .gap_2()
+                                                    .items_center()
+                                                    .w(px(x.1 as f32))
+                                                    .px_2()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .child(x.0.clone().unwrap())
+                                                    .text_color(gpui::white())
+                                                    .border_r_1()
+                                                    .border_color(rgb(gui::colors::MUTED))
+                                            }),
+                                        ),
+                                    ), // .child(seperator(gui::colors::BACKGROUND)),
                                 }
-                                AnalysisLine::Depth {
-                                    depth,
-                                    score,
-                                    best_move: _best_move,
-                                    nodes,
-                                    selective_depth,
-                                    time,
-                                } => div().child(
-                                    div().flex().children(
-                                        [
-                                            (depth, 30),
-                                            (score, 50),
-                                            (nodes, 80),
-                                            (time, 80),
-                                            (selective_depth, 20),
-                                        ]
-                                        .iter()
-                                        .filter(|x| x.0.is_some())
-                                        .map(|x| {
-                                            div()
-                                                .flex()
-                                                .flex_row()
-                                                .gap_2()
-                                                .items_center()
-                                                .w(px(x.1 as f32))
-                                                .px_2()
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .child(x.0.clone().unwrap())
-                                                .text_color(gpui::white())
-                                                .border_r_1()
-                                                .border_color(rgb(gui::colors::MUTED))
-                                        }),
-                                    ),
-                                ), // .child(seperator(gui::colors::BACKGROUND)),
-                            }
-                        })),
-                );
-        }).collect::<Vec<_>>();
+                            })),
+                    );
+            })
+            .collect::<Vec<_>>();
 
         let squares = (0..64)
             .collect::<Vec<_>>()
@@ -577,28 +580,80 @@ impl Render for Board {
                             .detach();
                         })),
                     )
-                    .child(menu_button("Engine Options").on_any_mouse_down(cx.listener(
-                        |board, _, _, cx| {
-                            // let bounds = Bounds::centered(None, size(px(300.), px(400.)), cx);
-                            // let options = WindowOptions {
-                            //     window_bounds: Some(WindowBounds::Windowed(bounds)),
-                            //     ..Default::default()
-                            // };
-                            // // let engine_handle = board.engine_handle.as_mut().unwrap();
-                            // // let engine_options = engine_handle.detect_engine_options().clone();
+                    .child(
+                        menu_button("Engines")
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    this.is_engines_menu_open = true;
+                                    cx.notify();
+                                }),
+                            )
+                            .when(self.is_engines_menu_open, |this| {
+                                let children = cx
+                                    .global::<SharedState>()
+                                    .engines
+                                    .engines
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, engine)| {
+                                        return div()
+                                            .child(engine.name.clone())
+                                            .py_0p5()
+                                            .px_1()
+                                            .cursor_pointer()
+                                            .hover(|this| this.bg(rgb(gui::colors::MUTED)))
+                                            .on_any_mouse_down(cx.listener(
+                                                move |_, _, _, cx| {
+                                                    let bounds = Bounds::centered(
+                                                        None,
+                                                        size(px(300.), px(400.)),
+                                                        cx,
+                                                    );
+                                                    let options = WindowOptions {
+                                                        window_bounds: Some(
+                                                            WindowBounds::Windowed(bounds),
+                                                        ),
+                                                        ..Default::default()
+                                                    };
 
-                            // let window = cx
-                            //     .open_window(options, |_, cx| {
-                            //         cx.new(|cx| EngineOptionsWindow {
-                            //             engine_tx: engine_handle.tx.clone(),
-                            //             options: engine_options,
-                            //             focus_handle: cx.focus_handle(),
-                            //         })
-                            //     })
-                            //     .unwrap();
-                            // window.update(cx, |_, _, cx| cx.entity()).unwrap();
-                        },
-                    ))),
+                                                    let window = cx
+                                                        .open_window(options, |_, cx| {
+                                                            cx.new(|_| EngineOptionsWindow {
+                                                                engine_index: index,
+                                                            })
+                                                        })
+                                                        .unwrap();
+                                                    window
+                                                        .update(cx, |_, _, cx| cx.entity())
+                                                        .unwrap();
+                                                },
+                                            ));
+                                    })
+                                    .collect::<Vec<_>>();
+
+                                return this.child(
+                                    deferred(
+                                        anchored()
+                                            .anchor(Corner::TopLeft)
+                                            .snap_to_window_with_margin(px(8.))
+                                            .child(
+                                                div()
+                                                    .children(children)
+                                                    .text_color(rgb(gui::colors::TEXT))
+                                                    .bg(rgb(gui::colors::SECONDARY_BACKGROUND))
+                                                    .on_mouse_down_out(cx.listener(
+                                                        |this, _, _, cx| {
+                                                            this.is_engines_menu_open = false;
+                                                            cx.notify();
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                    .priority(0),
+                                );
+                            }),
+                    ),
             ) //
             .child(
                 div()
@@ -649,7 +704,7 @@ impl Render for Board {
                                     8.,
                                 )
                                 .on_any_mouse_down(cx.listener(
-                                    move |board, _event, _window, cx| {
+                                    move |board, _event, _window, _cx| {
                                         board.undo_move();
                                     },
                                 )),
@@ -668,14 +723,12 @@ impl Render for Board {
                     ) //
                     .child(
                         div()
-                        .size_full()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .children(
-                            analysis
-                        ), //
-                    ) //
+                            .size_full()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .children(analysis), //
+                    ), //
             ) //
     }
 }
@@ -750,8 +803,9 @@ fn button(text: &str) -> impl IntoElement + InteractiveElement {
         .child(text.to_string())
 } //
 
-fn menu_button(text: &str) -> impl IntoElement + InteractiveElement {
+fn menu_button(text: &str) -> Stateful<Div> {
     div()
+        .id(ElementId::Name(SharedString::new(text).clone()))
         .flex_none()
         .px(px(2.))
         .hover(|this| this.bg(gpui::white()))
