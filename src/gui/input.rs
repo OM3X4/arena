@@ -633,7 +633,7 @@ pub struct InputController {
 }
 impl Render for InputController {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().child(self.text_input.clone()).size_full()
+        div().child(self.text_input.clone())
     }
 }
 

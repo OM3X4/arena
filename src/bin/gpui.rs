@@ -8,14 +8,16 @@ use arena::gui::input::{
 };
 use arena::{AnalysisLine, Engine, EngineOption, gui};
 use gpui::{
-    App, Application, AsyncApp, Bounds, Context, Corner, Div, ElementId, Entity, Focusable, FontWeight, Global, KeyBinding, MouseButton, SharedString, Stateful, TitlebarOptions, Window, WindowBounds, WindowOptions, anchored, deferred, div, img, prelude::*, px, rgb, size
+    App, Application, AsyncApp, Bounds, Context, Corner, Div, ElementId, Entity, Focusable,
+    FontWeight, Global, KeyBinding, MouseButton, SharedString, Stateful, TitlebarOptions, Window,
+    WindowBounds, WindowOptions, anchored, deferred, div, img, prelude::*, px, rgb, size,
 };
 use queenfish::board::Move;
 use queenfish::board::bishop_magic::init_bishop_magics;
 use queenfish::board::rook_magic::init_rook_magics;
 use queenfish::board::{Board as QueenFishBoard, UnMakeMove};
-use std::{collections::HashSet, path::Path};
 use rfd::FileDialog;
+use std::{collections::HashSet, path::Path};
 
 pub struct EnginesServices {
     engines: Vec<Engine>,
@@ -135,14 +137,19 @@ impl Render for EngineOptionsWindow {
             .child(format!("Engine Options:"))
             .child(
                 div()
+                    .my_2()
                     .text_base()
+                    .flex()
+                    .items_center()
+                    .gap_1()
                     .child("Show Analysis")
                     .child(check_box(engine_is_show))
                     .on_any_mouse_down(cx.listener(|engine_options_window, _, _, cx| {
-                        let engine = &mut cx.global_mut::<SharedState>().engines.engines[engine_options_window.engine_index];
+                        let engine = &mut cx.global_mut::<SharedState>().engines.engines
+                            [engine_options_window.engine_index];
                         engine.is_show = !engine.is_show;
                         cx.notify();
-                    }))
+                    })),
             )
             .child(
                 div()
@@ -151,6 +158,21 @@ impl Render for EngineOptionsWindow {
                     .font_weight(FontWeight::NORMAL)
                     .text_color(rgb(gui::colors::TEXT))
                     .children(options),
+            )
+            .child(
+                div()
+                    .my_2()
+                    .flex()
+                    .w_auto()
+                    .text_xs()
+                    .child(
+                        button("Remove Engine")
+                            .on_any_mouse_down(cx.listener(|engine_options_window, _, window, cx| {
+                                window.remove_window();
+                                cx.global_mut::<SharedState>().engines.engines.remove(engine_options_window.engine_index);
+                                cx.notify();
+                            }))
+                    )
             )
     }
 }
@@ -170,12 +192,14 @@ impl Render for FenWindow {
         div()
             .bg(rgb(gui::colors::BACKGROUND))
             .text_color(rgb(gui::colors::TEXT))
+            .flex()
             .flex_col()
             .items_center()
             .justify_center()
-            .py_8()
+            .size_full()
+            // .py_8()
             .child(format!("Enter FEN:"))
-            .child(self.input_controller.clone())
+            .child(div().child(self.input_controller.clone()).w_full())
             .child(
                 button("Load").on_any_mouse_down(cx.listener(|this, _, _, cx| {
                     let input_controller = this.input_controller.clone().read(cx);
@@ -632,7 +656,7 @@ impl Render for Board {
                                 return this.child(
                                     deferred(
                                         anchored()
-                                            .anchor(Corner::TopLeft)
+                                            .anchor(Corner::BottomLeft)
                                             .snap_to_window_with_margin(px(8.))
                                             .child(
                                                 div()
@@ -812,12 +836,14 @@ fn main() {
         cx.on_window_closed(|cx| {
             let engines = &mut cx.global_mut::<SharedState>().engines.engines;
             engines.iter_mut().for_each(|e| e.disconnect());
-        }).detach();
+        })
+        .detach();
     });
 }
 
 fn button(text: &str) -> impl IntoElement + InteractiveElement {
     div()
+        .id(ElementId::Name(SharedString::new(text).clone()))
         .flex_none()
         .px_2()
         .bg(rgb(0xf7f7f7))
@@ -832,7 +858,7 @@ fn button(text: &str) -> impl IntoElement + InteractiveElement {
 fn menu_button(text: &str) -> Stateful<Div> {
     div()
         .id(ElementId::Name(SharedString::new(text).clone()))
-        .flex_none()
+        .flex()
         .px(px(2.))
         .hover(|this| this.bg(gpui::white()))
         .font_weight(FontWeight::MEDIUM)
