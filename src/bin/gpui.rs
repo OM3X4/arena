@@ -812,18 +812,18 @@ impl Render for Board {
                     .gap_2()
                     .child(
                         div().flex().child(
-                            div()
-                                .w(board_size)
-                                .h(board_size)
-                                .grid()
-                                .grid_cols(8)
-                                .grid_rows(8)
-                                .gap(px(-1.))
-                                .children(squares)
-                                .on_mouse_down_out(cx.listener(|board, _, _, cx| {
-                                    board.selected_square = None;
-                                    cx.notify();
-                                })),
+                                div()
+                                    .w(board_size)
+                                    .h(board_size)
+                                    .grid()
+                                    .grid_cols(8)
+                                    .grid_rows(8)
+                                    .gap(px(-1.))
+                                    .children(squares)
+                                    .on_mouse_down_out(cx.listener(|board, _, _, cx| {
+                                        board.selected_square = None;
+                                        cx.notify();
+                                    })),
                         ),
                     ) //
                     .child(
@@ -875,12 +875,12 @@ fn main() {
 
         let engines = vec![
             Engine::new(
-                "C:\\Learn\\LearnRust\\chess\\target\\release\\uci.exe",
-                "Queenfish 2",
-            ),
-            Engine::new(
                 "C:/Program Files/stockfish/stockfish-windows-x86-64-avx2.exe",
                 "Stockfish",
+            ),
+            Engine::new(
+                "C:\\Learn\\LearnRust\\chess\\target\\release\\uci.exe",
+                "Queenfish 2",
             ),
         ];
         cx.set_global(SharedState {
@@ -920,9 +920,20 @@ fn main() {
         )
         .unwrap();
         cx.activate(true);
-        cx.on_window_closed(|cx| {
-            let engines = &mut cx.global_mut::<SharedState>().engines.engines;
-            engines.iter_mut().for_each(|e| e.disconnect());
+        cx.on_app_quit(|cx| {
+            // borrow happens here (synchronously)
+            let mut engines = cx
+                .global_mut::<SharedState>()
+                .engines
+                .engines
+                .drain(..) // optional: take ownership if appropriate
+                .collect::<Vec<_>>();
+
+            Box::pin(async move {
+                for e in &mut engines {
+                    e.disconnect();
+                }
+            })
         })
         .detach();
     });

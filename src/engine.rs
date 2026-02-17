@@ -230,12 +230,6 @@ impl Engine {
             tx: cmd_tx,
             rx: evt_rx,
         });
-
-        // EngineHandle {
-        //     process: child_process,
-        //     tx: cmd_tx,
-        //     rx: evt_rx,
-        // }
     } //
 
     pub fn send_command(&mut self, command: &str) {
