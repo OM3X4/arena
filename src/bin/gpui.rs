@@ -18,6 +18,7 @@ use queenfish::board::bishop_magic::init_bishop_magics;
 use queenfish::board::rook_magic::init_rook_magics;
 use queenfish::board::{Board as QueenFishBoard, UnMakeMove};
 use rfd::FileDialog;
+use std::iter::Cloned;
 use std::{collections::HashSet, path::Path};
 
 pub struct EnginesServices {
@@ -552,11 +553,44 @@ impl Render for Board {
                 let mut element = div()
                     .size_full()
                     .bg(rgb(color))
-                    .p_0p5()
+                    .p(px(2.))
                     .flex()
                     .items_center()
                     .justify_center()
                     .child(img(Path::new(piece_image)).size_full());
+
+                if (i < 8 && !self.is_board_flipped) || (i > 55 && self.is_board_flipped) {
+                    element = element.child(
+                        div()
+                            .absolute()
+                            .right(px(3.))
+                            .bottom_0()
+                            .text_color(match color {
+                                gui::colors::BOARD_DARK => rgb(gui::colors::BOARD_LIGHT),
+                                _ => rgb(gui::colors::BOARD_DARK),
+                            })
+                            .text_size(px(10.))
+                            .child(
+                                ((b'a' + (i as u8 % 8)) as char).to_string()
+                            ),
+                    );
+                }
+                if (i % 8 == 0 && !self.is_board_flipped) || (i % 8 == 7 && self.is_board_flipped) {
+                    element = element.child(
+                        div()
+                            .absolute()
+                            .left(px(3.))
+                            .top_0()
+                            .text_color(match color {
+                                gui::colors::BOARD_DARK => rgb(gui::colors::BOARD_LIGHT),
+                                _ => rgb(gui::colors::BOARD_DARK),
+                            })
+                            .text_size(px(10.))
+                            .child(
+                                ((i / 8) + 1).to_string()
+                            ),
+                    );
+                }
 
                 if self
                     .available_moves
