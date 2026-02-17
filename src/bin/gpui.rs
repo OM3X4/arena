@@ -161,12 +161,12 @@ impl Render for EngineOptionsWindow {
             .child(div().my_2().flex().w_auto().text_xs().child(
                 button("Remove Engine").on_any_mouse_down(cx.listener(
                     |engine_options_window, _, window, cx| {
-                                window.remove_window();
+                        window.remove_window();
                         cx.global_mut::<SharedState>()
                             .engines
                             .engines
                             .remove(engine_options_window.engine_index);
-                                cx.notify();
+                        cx.notify();
                     },
                 )),
             ))
@@ -229,6 +229,14 @@ impl Focusable for Board {
 
 impl Board {
     pub fn select_square(&mut self, square: u8) {
+        match self.board.game_result() {
+            queenfish::board::GameResult::InProgress => {}
+            _ => {
+                self.available_moves = Vec::new();
+                return;
+            }
+        }
+
         let moves = self.board.generate_moves();
         let available_squares = self
             .available_moves
@@ -237,6 +245,14 @@ impl Board {
             .collect::<Vec<_>>();
         if available_squares.contains(&square) {
             self.selected_square = None;
+
+            match self.board.game_result() {
+                queenfish::board::GameResult::InProgress => {}
+                _ => {
+                    self.available_moves = Vec::new();
+                    return;
+                }
+            }
 
             let selected_mv = self
                 .available_moves
@@ -293,10 +309,6 @@ impl Board {
         self.current_move_index = 0;
         self.make_move_history = Vec::new();
         self.unmake_move_history = Vec::new();
-        // if let Some(handle) = self.engine_handle.as_mut() {
-        //     handle.send_command("stop\n");
-        // }
-        // self.analysis.clear();
         self.is_analyzing = false;
     } //
 
@@ -311,8 +323,6 @@ impl Board {
         }
 
         self.is_analyzing = false;
-        // self.analysis.clear();
-        // self.engine_handle.as_mut().unwrap().send_command("stop\n");
         let mv = Move::from_uci(mv.as_str(), &(self.board));
         let unmakemove = self.board.make_move(mv);
         self.make_move_history.push(mv);
@@ -325,8 +335,6 @@ impl Board {
             return;
         }
         self.is_analyzing = false;
-        // self.analysis.clear();
-        // self.engine_handle.as_mut().unwrap().send_command("stop\n");
         let mv = self.make_move_history[self.current_move_index];
         self.board.make_move(mv);
         self.current_move_index += 1;
@@ -338,8 +346,6 @@ impl Board {
         }
         let current_move_index = self.current_move_index - 1;
         self.is_analyzing = false;
-        // self.analysis.clear();
-        // self.engine_handle.as_mut().unwrap().send_command("stop\n");
         let unmake = self.unmake_move_history[current_move_index];
         self.board.unmake_move(unmake);
         self.current_move_index -= 1;
@@ -431,6 +437,34 @@ impl Render for Board {
             })
             .collect::<Vec<_>>();
 
+        let losing_tag_index: Option<usize>;
+        let winning_tag_index: Option<usize>;
+        let draw_tag_index: Option<(usize, usize)>;
+
+        let game_result = self.board.game_result();
+        match game_result {
+            queenfish::board::GameResult::InProgress => {
+                losing_tag_index = None;
+                winning_tag_index = None;
+                draw_tag_index = None;
+            }
+            queenfish::board::GameResult::WhiteWin => {
+                losing_tag_index = Some(self.board.black_king_sq());
+                winning_tag_index = Some(self.board.white_king_sq());
+                draw_tag_index = None;
+            }
+            queenfish::board::GameResult::BlackWin => {
+                losing_tag_index = Some(self.board.white_king_sq());
+                winning_tag_index = Some(self.board.black_king_sq());
+                draw_tag_index = None;
+            }
+            queenfish::board::GameResult::Draw(_) => {
+                losing_tag_index = None;
+                winning_tag_index = None;
+                draw_tag_index = Some((self.board.white_king_sq(), self.board.black_king_sq()));
+            }
+        }
+
         let squares = (0..64)
             .collect::<Vec<_>>()
             .chunks(8)
@@ -521,6 +555,63 @@ impl Render for Board {
                                         .h_1_3(),
                                 ),
                         );
+                    }
+                }
+
+                if let Some(index) = winning_tag_index {
+                    if index == i {
+                        element = element.child(deferred(
+                            div()
+                                .absolute()
+                                .right_neg_1_6()
+                                .top_neg_1_6()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(rgb(gui::colors::SUCCESS))
+                                .rounded_full()
+                                .w_1_2() // Adjust size as needed
+                                .h_1_2()
+                                .child(img(Path::new("svg/crown.svg")).size_full()),
+                        ))
+                    }
+                }
+
+                if let Some(index) = losing_tag_index {
+                    if index == i {
+                        element = element.child(deferred(
+                            div()
+                                .absolute()
+                                .right_neg_1_6()
+                                .top_neg_1_6()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(rgb(gui::colors::ERROR))
+                                .rounded_full()
+                                .w_1_2() // Adjust size as needed
+                                .h_1_2()
+                                .child(img(Path::new("svg/forfeit.svg")).size_full()),
+                        ))
+                    }
+                }
+
+                if let Some((white_index, black_index)) = draw_tag_index {
+                    if white_index == i || black_index == i {
+                        element = element.child(deferred(
+                            div()
+                                .absolute()
+                                .right_neg_1_6()
+                                .top_neg_1_6()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(rgb(gui::colors::MUTED))
+                                .rounded_full()
+                                .w_1_2() // Adjust size as needed
+                                .h_1_2()
+                                .child(img(Path::new("svg/half.svg")).size_full()),
+                        ))
                     }
                 }
 
