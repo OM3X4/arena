@@ -18,7 +18,6 @@ use queenfish::board::bishop_magic::init_bishop_magics;
 use queenfish::board::rook_magic::init_rook_magics;
 use queenfish::board::{Board as QueenFishBoard, UnMakeMove};
 use rfd::FileDialog;
-use std::iter::Cloned;
 use std::{collections::HashSet, path::Path};
 
 pub struct EnginesServices {
@@ -195,7 +194,6 @@ impl Render for FenWindow {
             .items_center()
             .justify_center()
             .size_full()
-            // .py_8()
             .child(format!("Enter FEN:"))
             .child(div().child(self.input_controller.clone()).w_full())
             .child(
@@ -509,6 +507,12 @@ impl Render for Board {
             }
         }
 
+        let is_king_in_check = self.board.is_king_in_check(self.board.turn);
+        let current_turn_king_sq = match self.board.turn {
+            queenfish::board::Turn::WHITE => self.board.white_king_sq(),
+            queenfish::board::Turn::BLACK => self.board.black_king_sq(),
+        };
+
         let mut squares = (0..64)
             .collect::<Vec<_>>()
             .chunks(8)
@@ -589,6 +593,18 @@ impl Render for Board {
                             .child(
                                 ((i / 8) + 1).to_string()
                             ),
+                    );
+                }
+                if is_king_in_check && i == current_turn_king_sq as usize {
+                    element = element.child(
+                        div()
+                            .absolute()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(rgb(gui::colors::ERROR))
+                            .opacity(0.5)
                     );
                 }
 
